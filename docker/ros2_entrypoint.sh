@@ -1,43 +1,36 @@
 #!/bin/bash
-
 set -e
 
-# Source bashrc
-source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash
+# Source
 source ~/.bashrc
 
-# Source ROS2 distro
-if [[ -n "${ROS_DISTRO}" ]]; then
-	source /opt/ros/$ROS_DISTRO/setup.bash
-	export ROS_DOMAIN_ID=0
-fi
+# git configuration
+git config --global core.editor "code --wait"
 
 # Source ROS2 workspace
 if [[ -d "../install" ]]; then
 	source ~/ros2_esa_ws/install/setup.sh
 fi
 
-# Print information
+# Ubuntu info
 if [[ $USER == $UBUNTU_USER ]] && [[ $UID == $UBUNTU_UID ]]; then
 	echo "User credentials:
-	- USERNAME: ($USER:$UID)
-	- HOSTNAME: $HOSTNAME
-	- PASSWORD: $UBUNTU_PSW
-	"
+    - USERNAME: $HOSTNAME: ($USER:$UID)
+    - PASSWORD: $UBUNTU_PSW
+    "
 else
 	echo "User is not set correctly!"
 	if ![[ $USER == $UBUNTU_USER ]]; then
-		echo "$USER is not $UBUNTU_USER"
+		echo "Username mismatch: $USER is not $UBUNTU_USER"
 	else
-		echo "$UID is not $UBUNTU_UID"
+		echo "UID mismatch: $UID is not $UBUNTU_UID"
 	fi
-	return
+	exit
 fi
 
+# ROS2 info
 echo "ROS2 environment:
-	- ROS_DISTRO: $ROS_DISTRO
-	- ROS_VERSION: $ROS_VERSION
-	- ROS_PYTHON_VERSION: $ROS_PYTHON_VERSION
+    - ROS $ROS_VERSION: $ROS_DISTRO
 "
 
 

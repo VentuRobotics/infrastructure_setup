@@ -1,7 +1,6 @@
-#! base-stage
-ARG UBUNTU_RELEASE
+ARG ROS_DISTRO
 
-FROM ubuntu:$UBUNTU_RELEASE as base-stage
+FROM $ROS_DISTRO as base-stage
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -26,9 +25,7 @@ RUN usermod -aG audio $UBUNTU_USER
 RUN usermod -aG video $UBUNTU_USER
 
 # Update
-# RUN add-apt-repository universe
-RUN apt update && \
-	apt upgrade -y
+RUN apt update
 
 
 ########################
@@ -48,18 +45,25 @@ RUN apt install --quiet -y \
     build-essential \
     clang \
     cmake \
-    ccache
+    ccache \
+	ninja-build
 
 # C++ linter
 RUN apt install --quiet -y \
     clang-tidy clang-tools \
-    cppcheck
+    cppcheck \
+    astyle
 
 # C++ testing deps
 RUN apt install --quiet -y \
     libgtest-dev \
     libgmock-dev \
     lcov
+
+# C++ common lib
+RUN apt install --quiet -y \
+    libboost-all-dev \
+    libeigen3-dev
 
 # Python deps
 RUN apt install --quiet -y \
@@ -79,7 +83,7 @@ RUN pip3 install --upgrade \
     mypy
 
 RUN pip3 install --upgrade \
-    pytest \
+    pytest==7.1.3 \
     pytest-mock \
     pytest-cov pytest-html \
     pytest-pep8 \
@@ -91,10 +95,18 @@ RUN pip3 install --upgrade \
     pyyaml \
     numpy scipy
 
+# Python parsers
+RUN pip3 install --upgrade \
+    pyyaml \
+    jsonschema \
+    jinja2 \
+    toml
+
+
 # Python system control deps
-# RUN pip3 install --upgrade \
-#     qpsolvers \
-#     quadprog gurobipy osqp cvxopt cvxpy
+RUN pip3 install --upgrade \
+    qpsolvers \
+    quadprog gurobipy osqp cvxopt cvxpy
 
 # # install CVXOPT (https://cvxopt.org/)
 # RUN pip3 install --upgrade cvxopt
@@ -109,32 +121,96 @@ RUN pip3 install --upgrade \
 # RUN pip3 install --upgrade osqp
 
 
-# Bazel (https://bazel.build/install/ubuntu)
-# RUN curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel-archive-keyring.gpg
-# RUN mv bazel-archive-keyring.gpg /usr/share/keyrings
-# RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
-# RUN apt update && apt install --quiet -y bazel
-
-# Open html links
-RUN apt install --quiet -y lynx
 
 
-##############
-# ENTRYPOINT #
-##############
+#! gazebo-stage
+# FROM base-stage as gazebo-stage
+
+
+#! ignition-stage
+# FROM base-stage as ignition-stage
+
+# Install Gazebo Ignition
+# RUN sh -c 'echo "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2-latest.list'
+# RUN curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+# RUN apt update
+
+
+
+
+
+#! px4-stage
+# FROM base-stage as px4-stage
+
+RUN apt install --quiet -y openjdk-11-jdk
+
+# Data serialization
+RUN apt install --quiet -y \
+    protobuf-compiler
+
+# X11
+RUN apt install --quiet -y \
+    libx11-dev \
+    libxrandr-dev \
+    libxi-dev \
+    libxinerama-dev
+
+# ROS
+RUN pip3 install --upgrade \
+    pyros-genmsg
+
+# Others
+RUN pip3 install --upgrade \
+    empy
+
 
 # Clean
 RUN apt -y autoremove \
 	&& apt clean autoclean \
 	&& rm -rf /var/lib/apt/lists/{apt,dpkg,cache,log} /tmp/* /var/tmp/*
 
+
+#! px4-1.14-stage (https://docs.px4.io/main/en/ros/ros2_comm.html#humble)
+# FROM base-stage as px4-1.14-stage
+
+#TODO PX4 Flight controller (NEW)
+RUN pip3 install --upgrade kconfiglib
+
 # Set user
 USER $UBUNTU_USER
 WORKDIR /home/$UBUNTU_USER
 
+# Clone PX4 stack
+RUN git clone --recursive https://github.com/PX4/PX4-Autopilot.git
+RUN echo $UBUNTU_PSW | sudo -S bash PX4-Autopilot/Tools/setup/ubuntu.sh
+# RUN echo $UBUNTU_PSW | sudo -S bash PX4-Autopilot/Tools/setup/ubuntu.sh --no-sim-tools
+RUN cd PX4-Autopilot/ && make px4_sitl
+#TODO delete source and intermediate files
+
+
+# Setup Micro XRCE-DDS Agent & Client
+RUN git clone https://github.com/eProsima/Micro-XRCE-DDS-Agent.git
+RUN cd Micro-XRCE-DDS-Agent \
+    && mkdir build \
+    && cd build \
+    && cmake .. \
+    && make \
+    && echo $UBUNTU_PSW | sudo -S make install \
+    && echo $UBUNTU_PSW | sudo -S ldconfig /usr/local/lib/
+
+
+
+
+
+
+
+##############
+# ENTRYPOINT #
+##############
+
 # Set entrypoint
-COPY ./docker/entrypoint.sh /
-ENTRYPOINT ["/entrypoint.sh"]
+COPY ./docker/ros2_entrypoint.sh /
+ENTRYPOINT ["/ros2_entrypoint.sh"]
 
 ENV force_color_prompt=yes
 CMD ["bash"]

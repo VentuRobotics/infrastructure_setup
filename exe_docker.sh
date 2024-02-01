@@ -1,29 +1,27 @@
 #!/bin/bash
 
-source docker/ubuntu_config.env
+# source exe_docker.sh <CMD> <PROJECT_NAME> <STAGE>
+
+source docker/config.env $2 $3
+
+if [ $? -ne 0 ]; then
+    return 1
+fi
 
 
 #! Environment variables
 
 # Docker path
 DOCKER_HOME=/home/$UBUNTU_USER
-LOCAL_WS_PATH=$PWD/$WS_VOLUME
-DOCKER_WS_PATH=$DOCKER_HOME/$WS_VOLUME
+LOCAL_WS_PATH=$WS_PATH/$WS_NAME
+DOCKER_WS_PATH=$DOCKER_HOME/$WS_NAME
 PROJECT_FOLDER=$REPO_AUTHOR/$REPO_NAME
 
 # Docker file/image/container
-if [[ $ROS_ENABLE == true ]]; then
-    DOCKER_FILE=Dockerfile_ros
-else
-    DOCKER_FILE=Dockerfile
-fi
-
-if [[ $GITLAB_REGISTRY == true ]]; then
-    DOCKER_IMAGE=registry.gitlab.com/${PROJECT_FOLDER}-image
-else
-    DOCKER_IMAGE=${PROJECT_FOLDER}-image
-fi
-DOCKER_CONTAINER=${REPO_NAME}-container  # gtest_demo-0.1-container
+# DOCKER_FILE=Dockerfile
+DOCKER_IMAGE=${PROJECT_FOLDER}-image
+DOCKER_REG_IMAGE=registry.gitlab.com/drone5205538/infrastructure_setup
+DOCKER_CONTAINER=${REPO_NAME}-container
 
 
 #! Commands
@@ -36,34 +34,81 @@ if [[ $1 == "build" ]]; then
     - Stage:            $BUILD_STAGE
     "
 
-    mkdir -p workspace
+    build_args=(
+        "UBUNTU_USER":$UBUNTU_USER
+        "UBUNTU_PSW":$UBUNTU_PSW
+        "UBUNTU_UID":$UBUNTU_UID
+        "UBUNTU_GID":$UBUNTU_GID
+    )
 
-    docker build --rm \
-                 --build-arg UBUNTU_RELEASE=$UBUNTU_RELEASE \
-                 --build-arg ROS_DISTRO=$ROS_DISTRO \
-                 --build-arg UBUNTU_USER=$UBUNTU_USER \
-                 --build-arg UBUNTU_PSW=$UBUNTU_PSW \
-                 --build-arg UBUNTU_UID=$UBUNTU_UID \
-	             --build-arg UBUNTU_GID=${UBUNTU_GID} \
+    DOCKER_BUILD_ARGS=()
+    for key in "${build_args[@]}" ; do
+        DOCKER_BUILD_ARGS+="--build-arg ${key%%:*}=${key#*:} "
+    done
+
+    docker build --pull --rm \
+                 --build-arg BASE_IMAGE=$BASE_IMAGE \
+                 $DOCKER_BUILD_ARGS \
                  -f $PWD/docker/$DOCKER_FILE \
                  --target $BUILD_STAGE \
                  -t $DOCKER_IMAGE:$TAG .
 
 # push
 elif [[ $1 == "push" ]]; then
-    echo "Push dockerimage to GitLab container registry
+    echo "Push dockerimage to GitLab container registry: $DOCKER_IMAGE -> $DOCKER_REG_IMAGE
     "
-
     docker login registry.gitlab.com
-    docker push $DOCKER_IMAGE:$TAG
+
+    # docker push $DOCKER_IMAGE:$TAG
+
+    docker tag $DOCKER_IMAGE:$TAG $DOCKER_REG_IMAGE:$TAG
+    docker push $DOCKER_REG_IMAGE:$TAG
+    docker rmi $DOCKER_REG_IMAGE:$TAG
 
 # run
 elif [[ $1 == "run" ]]; then
     echo "Run $DOCKER_CONTAINER -> $DOCKER_IMAGE:$TAG
     "
     xhost +     # enable access to xhost from the container
+    echo
+
+    # Check workspace folder validity
+    echo "Workspace dir: ${LOCAL_WS_PATH}"
+    if [ -d "$LOCAL_WS_PATH" ]; then
+        DOCKER_VOLUMES="-v ${LOCAL_WS_PATH}:${DOCKER_WS_PATH}:rw"
+    else
+        echo "ERROR: No workspace provided!"
+        return
+    fi
+
+    # Check libraries folder validity
+    if [ -d "$LIBS_PATH" ]; then
+        echo "External libraries dir: $LIBS_PATH"
+        for item in "$LIBS_PATH"/*; do
+            if [ -e "$item" ]; then
+                filename=$(basename "$item")
+                DOCKER_VOLUMES+=" -v $LIBS_PATH/$filename:$DOCKER_HOME/$filename:rw"
+            fi
+        done
+    fi
+
+    # Check config folder validity
+    if [ -d "$CONFIG_PATH" ]; then
+        echo "Config dir: $CONFIG_PATH"
+        shopt -s dotglob
+        for item in "$CONFIG_PATH"/*; do
+            if [ -e "$item" ]; then
+                filename=$(basename "$item")
+                DOCKER_VOLUMES+=" -v $CONFIG_PATH/$filename:$DOCKER_WS_PATH/$filename:rw"
+            fi
+        done
+    fi
+
+    # Docker container command
+    echo "Docker container cmd: $DOCKER_RUN_CMD"
+
     docker run  -it --rm --privileged \
-                -h $USER \
+                -h $HOSTNAME \
                 -e LOCAL_USER_ID=$UBUNTU_UID \
                 -e USER=$UBUNTU_USER \
                 -e UID=${UBUNTU_UID} \
@@ -76,12 +121,12 @@ elif [[ $1 == "run" ]]; then
                 -v /etc/localtime:/etc/localtime:ro \
                 -v /tmp/.X11-unix:/tmp/.X11-unix \
                 -v /tmp/.docker.xauth:/tmp/.docker.xauth \
-                -v $LOCAL_WS_PATH:$DOCKER_WS_PATH:rw \
-            	-v /dev:/dev \
+                ${DOCKER_VOLUMES} \
+                -v /dev:/dev \
                 --device /dev:/dev \
                 -w $DOCKER_WS_PATH \
                 --name $DOCKER_CONTAINER \
-                $DOCKER_IMAGE:$TAG /bin/bash
+                $DOCKER_IMAGE:$TAG $DOCKER_RUN_CMD
 
 # exec
 elif [[ $1 == "exec" ]]; then
@@ -111,24 +156,53 @@ elif [[ $1 == "install" ]]; then
         sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     sudo apt update
-    sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 	echo "Setting Docker permission/ownership"
 	sudo chown -R $USER:$USER $DOCKER_HOME/.docker      # set docker ownership
 	sudo chmod -R g+rwx "$DOCKER_HOME/.docker"        	# set docker permissions
 
-	sudo apt autoremove
+	sudo apt autoremove -y
 
     echo "Configure Docker"
 	sudo groupadd docker                                # create the docker group
 	sudo usermod -aG docker ${USER}                     # add your user to the docker group
 	newgrp docker                                       # activate the changes to groups
 
+    sudo apt install -y x11-xserver-utils
+
+    if [ "$ARCH" == "x86_64" ]; then
+        sudo apt install -y qemu qemu-user-static binfmt-support  # install QEMU
+    fi
+
+# inspect
+elif [[ $1 == "inspect" ]]; then
+    echo -e "Resume:"
+    docker system df
+    echo
+
+    echo -e "Images:"
+    docker images
+    echo
+
+    echo -e "Volumes:"
+    docker volume ls
+    echo
+
+    echo -e "Containers:"
+    docker ps -a
+    echo
+
+    echo -e "Network:"
+    docker network ls
+    echo
+
 # clean
 elif [[ $1 == "clean" ]]; then
     echo "Clean all the not needed images and container"
     docker image prune -f
     docker container prune -f
+    docker system prune -f
 
 # info
 elif [[ $1 == "info" ]]; then
@@ -138,7 +212,7 @@ elif [[ $1 == "info" ]]; then
     - Project name:             $REPO_NAME
     - Project author:           $REPO_AUTHOR"
     echo "Ubuntu info
-    - Ubuntu distro:            $UBUNTU_RELEASE
+    - Ubuntu distro:            ${lsb_release -rs}
     - Ubuntu user:              $UBUNTU_USER ($UBUNTU_UID)"
     echo "Container info
     - Dockerfile name:          $DOCKER_FILE
@@ -155,6 +229,7 @@ elif [[ $1 == "help" ]]; then
     - [exec]:       join to the existing container
     - [permission]: add user permissions to docker envoronment
     - [install]:    install and configure Docker
+    - [inspect]:    show information of images, containers, volumes and networks
     - [clean]:      remove not needed images and container
     - [info]:       show docker environment info
     - [help]:       show script commands"
