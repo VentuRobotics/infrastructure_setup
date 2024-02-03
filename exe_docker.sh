@@ -162,7 +162,7 @@ elif [[ $1 == "install" ]]; then
 	sudo chown -R $USER:$USER $DOCKER_HOME/.docker      # set docker ownership
 	sudo chmod -R g+rwx "$DOCKER_HOME/.docker"        	# set docker permissions
 
-	sudo apt autoremove
+	sudo apt autoremove -y
 
     echo "Configure Docker"
 	sudo groupadd docker                                # create the docker group
@@ -170,6 +170,10 @@ elif [[ $1 == "install" ]]; then
 	newgrp docker                                       # activate the changes to groups
 
     sudo apt install -y x11-xserver-utils
+
+    if [ "$ARCH" == "x86_64" ]; then
+        sudo apt install -y qemu qemu-user-static binfmt-support  # install QEMU
+    fi
 
 # inspect
 elif [[ $1 == "inspect" ]]; then
