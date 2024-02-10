@@ -33,6 +33,7 @@ echo "ROS2 environment:
     - ROS $ROS_VERSION: $ROS_DISTRO
 "
 
+export FASTRTPS_DEFAULT_PROFILES_FILE=/home/user/ros2_ws/fastrtps-profile.xml
 
 if [[ -n "$CI" ]]; then
     exec /bin/bash

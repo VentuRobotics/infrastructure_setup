@@ -121,6 +121,7 @@ elif [[ $1 == "run" ]]; then
                 -v /etc/localtime:/etc/localtime:ro \
                 -v /tmp/.X11-unix:/tmp/.X11-unix \
                 -v /tmp/.docker.xauth:/tmp/.docker.xauth \
+                -v /dev/shm:/dev/shm \
                 ${DOCKER_VOLUMES} \
                 -v /dev:/dev \
                 --device /dev:/dev \
