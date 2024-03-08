@@ -122,6 +122,7 @@ RUN apt install --quiet -y \
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> ~/.bashrc
+RUN echo "export ROS_DOMAIN_ID=0" >> ~/.bashrc
 
 ENV RCUTILS_COLORIZED_OUTPUT=1
 ENV RCUTILS_LOGGING_USE_STDOUT=1
@@ -150,6 +151,7 @@ RUN rm -r pigpio-master
 
 RUN pigpiod
 
+
 # Clean
 USER root
 RUN apt -y autoremove && apt clean autoclean \
@@ -166,6 +168,7 @@ ENTRYPOINT ["/ros2_entrypoint.sh"]
 RUN echo "source /usr/share/bash-completion/completions/git" >> ~/.bashrc
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> ~/.bashrc
+# RUN echo "export force_color_prompt=yes" >> ~/.bashrc
 
 ENV force_color_prompt=yes
 CMD ["bash"]
@@ -216,12 +219,23 @@ RUN apt install -y ros-$ROS_DISTRO-plotjuggler-ros
 #   https://docs.foxglove.dev/docs/connecting-to-data/frameworks/ros2/
 RUN wget https://github.com/foxglove/studio/releases/download/v1.75.0/foxglove-studio-1.75.0-linux-amd64.deb
 RUN apt install -y ./foxglove-studio-*.deb
-# RUN rm /foxglove-studio-*.deb
 RUN apt install -y ros-$ROS_DISTRO-foxglove-bridge
+RUN rm /foxglove-studio-*.deb
 
 # QEMU
-RUN apt install -y qemu-user-static
-COPY qemu-aarch64-static /usr/bin/qemu-aarch64-static
+# RUN apt install -y qemu-user-static
+# COPY qemu-aarch64-static /usr/bin/qemu-aarch64-static
+
+# pigpio
+USER $UBUNTU_USER
+WORKDIR /home/$UBUNTU_USER
+RUN wget https://github.com/joan2937/pigpio/archive/master.zip
+RUN unzip master.zip
+RUN cd pigpio-master && make
+USER root
+RUN cd pigpio-master && make install
+RUN rm -r master.zip
+RUN rm -r pigpio-master
 
 
 # Clean
@@ -240,6 +254,7 @@ ENTRYPOINT ["/ros2_entrypoint.sh"]
 RUN echo "source /usr/share/bash-completion/completions/git" >> ~/.bashrc
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> ~/.bashrc
+# RUN echo "export force_color_prompt=yes" >> ~/.bashrc
 
 ENV force_color_prompt=yes
 CMD ["bash"]
